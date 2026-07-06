@@ -18,7 +18,7 @@ from dataclasses import dataclass
 from typing import Callable
 
 APP_NAME = "Torrio"
-APP_VERSION = "1.2"
+APP_VERSION = "1.3"
 USER_AGENT = f"{APP_NAME}/{APP_VERSION} (Termux torrent search)"
 TIMEOUT = 20
 
@@ -824,36 +824,12 @@ def open_page(url: str) -> None:
         print(url)
 
 
-def set_wake_lock(enabled: bool) -> bool:
-    command_name = "termux-wake-lock" if enabled else "termux-wake-unlock"
-    command = shutil.which(command_name)
-
-    if not command:
-        if enabled:
-            print(
-                "Предупреждение: termux-wake-lock не найден. "
-                "При выключении экрана Android может приостановить загрузку."
-            )
-        return False
-
-    try:
-        completed = subprocess.run(
-            [command],
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-            check=False,
-        )
-        return completed.returncode == 0
-    except OSError:
-        return False
-
-
-def run_aria2(target: str, *, metadata_only: bool) -> int:
+def run_aria2(target: str, *, metadata_only: bool) -> None:
     aria2c = shutil.which("aria2c")
 
     if not aria2c:
         print("aria2c не найден. Установи: pkg install aria2")
-        return 127
+        return
 
     destination, _ = get_download_dir()
     print(f"Папка: {destination}")
@@ -872,21 +848,7 @@ def run_aria2(target: str, *, metadata_only: bool) -> int:
         )
 
     command.append(target)
-
-    wake_lock_acquired = set_wake_lock(True)
-
-    if wake_lock_acquired:
-        print("Wake lock: включён — экран можно выключить.")
-
-    try:
-        completed = subprocess.run(command, check=False)
-        return completed.returncode
-    except KeyboardInterrupt:
-        # Без Python traceback при Ctrl+C.
-        return 130
-    finally:
-        if wake_lock_acquired:
-            set_wake_lock(False)
+    subprocess.run(command, check=False)
 
 
 def show_result(item: Result) -> None:
@@ -950,9 +912,7 @@ def action_menu(item: Result) -> None:
                 )
 
         elif action == "d":
-            # После завершения aria2 Torrio тихо закрывается.
             run_aria2(target, metadata_only=False)
-            return
 
         elif action == "c":
             copy_target(target)
@@ -970,235 +930,8 @@ def action_menu(item: Result) -> None:
             print("Неизвестное действие.")
 
 
-def prompt_start_mode() -> str:
-    print(f"{APP_NAME} {APP_VERSION}\n")
-    print("1) Вставить magnet или ссылку")
-    print("2) Выбрать .torrent-файл")
-    print("3) Найти раздачу")
-    print("0) Выход")
-
-    while True:
-        try:
-            choice = input("> ").strip()
-        except (EOFError, KeyboardInterrupt):
-            print()
-            return "exit"
-
-        modes = {
-            "0": "exit",
-            "1": "link",
-            "2": "file",
-            "3": "search",
-        }
-
-        if choice in modes:
-            return modes[choice]
-
-        print("Введите 0, 1, 2 или 3.")
-
-
-def prompt_link() -> str | None:
-    print("\nВставь magnet-ссылку или URL .torrent:")
-    try:
-        value = input("> ").strip()
-    except (EOFError, KeyboardInterrupt):
-        print()
-        return None
-
-    if not value:
-        return None
-
-    lower = value.casefold()
-    if lower.startswith("magnet:?"):
-        return value
-
-    if lower.startswith(("http://", "https://")):
-        return value
-
-    print("Не похоже на magnet или HTTP/HTTPS-ссылку.")
-    return None
-
-
-def torrent_search_roots() -> list[Path]:
-    roots: list[Path] = []
-    home = Path.home()
-    shared_downloads = home / "storage" / "downloads"
-
-    for candidate in (
-        shared_downloads,
-        shared_downloads / APP_NAME,
-        home / APP_NAME,
-        Path.cwd(),
-    ):
-        try:
-            resolved = candidate.resolve()
-        except OSError:
-            resolved = candidate
-
-        if candidate.is_dir() and resolved not in roots:
-            roots.append(resolved)
-
-    return roots
-
-
-def find_torrent_files() -> list[Path]:
-    found: dict[str, Path] = {}
-
-    for root in torrent_search_roots():
-        try:
-            for path in root.rglob("*.torrent"):
-                if not path.is_file():
-                    continue
-
-                try:
-                    resolved = path.resolve()
-                except OSError:
-                    resolved = path
-
-                found[str(resolved)] = resolved
-        except (OSError, PermissionError):
-            continue
-
-    def sort_key(path: Path) -> tuple[float, str]:
-        try:
-            mtime = path.stat().st_mtime
-        except OSError:
-            mtime = 0.0
-        return (-mtime, path.name.casefold())
-
-    return sorted(found.values(), key=sort_key)
-
-
-def print_torrent_file(
-    number: int,
-    path: Path,
-    width: int,
-) -> None:
-    prefix = f"{number:>3}) "
-    indent = " " * len(prefix)
-    name_width = max(20, width - len(prefix))
-
-    wrapped_name = textwrap.wrap(
-        path.name,
-        width=name_width,
-        break_long_words=True,
-        break_on_hyphens=True,
-    ) or [""]
-
-    print(prefix + wrapped_name[0])
-    for line in wrapped_name[1:]:
-        print(indent + line)
-
-    try:
-        display_path = str(path.parent)
-    except OSError:
-        display_path = "?"
-
-    wrapped_path = textwrap.wrap(
-        display_path,
-        width=max(20, width - len(indent)),
-        break_long_words=True,
-        break_on_hyphens=True,
-    ) or [display_path]
-
-    for line in wrapped_path:
-        print(indent + line)
-
-
-def choose_torrent_file(page_size: int = 8) -> Path | None:
-    files = find_torrent_files()
-    width = terminal_width()
-
-    if not files:
-        print("\nВ Download и папках Torrio .torrent-файлы не найдены.")
-        return prompt_torrent_path()
-
-    page = 0
-
-    while True:
-        total_pages = max(1, (len(files) + page_size - 1) // page_size)
-        page = min(page, total_pages - 1)
-        start = page * page_size
-        end = min(start + page_size, len(files))
-
-        print("\n" + "─" * width)
-        print(
-            f".torrent-файлы {start + 1}–{end} из {len(files)} "
-            f"· страница {page + 1}/{total_pages}"
-        )
-        print("─" * width)
-
-        for index in range(start, end):
-            print_torrent_file(index + 1, files[index], width)
-            print()
-
-        print("номер = выбрать · n = дальше · p = назад · r = путь вручную · q = выход")
-
-        try:
-            command = input("> ").strip().lower()
-        except (EOFError, KeyboardInterrupt):
-            print()
-            return None
-
-        if command == "q":
-            return None
-        if command == "r":
-            return prompt_torrent_path()
-        if command == "n":
-            if page + 1 < total_pages:
-                page += 1
-            else:
-                print("Это последняя страница.")
-            continue
-        if command == "p":
-            if page > 0:
-                page -= 1
-            else:
-                print("Это первая страница.")
-            continue
-
-        try:
-            number = int(command)
-        except ValueError:
-            print("Введите номер, n, p, r или q.")
-            continue
-
-        if 1 <= number <= len(files):
-            return files[number - 1]
-
-        print(f"Номер должен быть от 1 до {len(files)}.")
-
-
-def prompt_torrent_path() -> Path | None:
-    print("\nУкажи полный путь к .torrent-файлу:")
-    try:
-        value = input("> ").strip()
-    except (EOFError, KeyboardInterrupt):
-        print()
-        return None
-
-    if not value:
-        return None
-
-    path = Path(value).expanduser()
-
-    if not path.is_file():
-        print("Файл не найден.")
-        return None
-
-    if path.suffix.casefold() != ".torrent":
-        print("Это не .torrent-файл.")
-        return None
-
-    return path
-
-
-def direct_download(target: str) -> None:
-    run_aria2(target, metadata_only=False)
-
-
 def prompt_spec() -> SearchSpec:
-    print("\nПоиск раздачи\n")
+    print(f"{APP_NAME} {APP_VERSION} — поиск торрент-раздач\n")
 
     while True:
         try:
@@ -1285,9 +1018,7 @@ def parse_args() -> argparse.Namespace:
 def main() -> int:
     args = parse_args()
 
-    # Прямой CLI-запрос оставляем для опытных пользователей.
     if args.query:
-        mode = "search"
         spec = SearchSpec(
             name=" ".join(args.query),
             format_hint=args.format_hint,
@@ -1295,25 +1026,6 @@ def main() -> int:
             exclude=parse_exclusions(args.exclude),
         )
     else:
-        mode = prompt_start_mode()
-
-        if mode == "exit":
-            return 0
-
-        if mode == "link":
-            target = prompt_link()
-            if target:
-                direct_download(target)
-            return 0
-
-        if mode == "file":
-            torrent_file = choose_torrent_file(
-                page_size=max(3, min(args.page_size, 20))
-            )
-            if torrent_file:
-                direct_download(str(torrent_file))
-            return 0
-
         spec = prompt_spec()
 
     width = terminal_width()
@@ -1365,7 +1077,4 @@ def main() -> int:
 
 
 if __name__ == "__main__":
-    try:
-        raise SystemExit(main())
-    except KeyboardInterrupt:
-        raise SystemExit(0)
+    raise SystemExit(main())
