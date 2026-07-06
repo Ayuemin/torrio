@@ -4,26 +4,30 @@
 
 ![Python](https://img.shields.io/badge/Python-3.x-blue)
 ![Android](https://img.shields.io/badge/Android-Termux-green)
+![Version](https://img.shields.io/badge/Torrio-1.3-cyan)
 ![License](https://img.shields.io/badge/License-MIT-yellow)
 
-Torrio provides a simple terminal interface for three common BitTorrent workflows on Android:
+Torrio gives Android users a simple terminal interface for three common BitTorrent workflows:
 
 1. Paste a magnet link or `.torrent` URL.
 2. Select a local `.torrent` file.
-3. Search for a torrent interactively.
+3. Search for torrents interactively.
 
-Search results are merged, ranked, deduplicated and displayed as numbered pages that are comfortable to use on a phone screen.
+Search results are merged, ranked, deduplicated and displayed as numbered pages designed for narrow phone screens.
 
-Torrio uses `aria2c` for downloads and automatically enables a Termux wake lock while aria2 is running, so the CPU does not go to sleep when the screen is turned off.
+Torrio uses `aria2c` for downloads and automatically enables a Termux wake lock while aria2 is running, helping downloads continue when the screen is turned off.
 
 ## Features
 
+- English interactive terminal UI
+- Lightweight ANSI colors with automatic fallback to plain text
+- `NO_COLOR` support
 - Interactive torrent search from Termux
-- Search query refinement by name, format/type and version/year/date
-- Excluded words and excluded phrases
+- Query refinement by name, format/type and version/year/date
+- Excluded words and quoted excluded phrases
 - Search across Knaben, FOSS Torrents and Internet Archive
 - Result ranking and deduplication
-- Paginated, numbered results designed for narrow terminal screens
+- Numbered, paginated results for mobile terminals
 - Magnet link support
 - Remote `.torrent` URL support
 - Local `.torrent` file discovery and selection
@@ -39,8 +43,9 @@ Torrio uses `aria2c` for downloads and automatically enables a Termux wake lock 
 - [Termux](https://github.com/termux/termux-app)
 - Python 3
 - aria2
+- curl for the installation command below
 
-For a regular Android device, the stable Termux build from F-Droid or the official Termux GitHub repository is recommended.
+For a regular Android device, use the stable Termux build from F-Droid or the official Termux GitHub repository.
 
 ## Installation on a new Android device
 
@@ -67,19 +72,19 @@ termux-setup-storage
 
 Approve the Android storage permission request.
 
-After this step, the Android `Download` directory is available in Termux as:
+The Android `Download` directory will then be available in Termux as:
 
 ```text
 ~/storage/downloads
 ```
 
-Torrio stores completed downloads in:
+Torrio stores downloads in:
 
 ```text
 Download/Torrio
 ```
 
-Inside Termux, the same directory is:
+The same directory inside Termux is:
 
 ```text
 ~/storage/downloads/Torrio
@@ -110,7 +115,7 @@ Verify the installation:
 which torrio
 ```
 
-Then start Torrio:
+Start Torrio:
 
 ```bash
 torrio
@@ -118,57 +123,41 @@ torrio
 
 ## Start menu
 
-Torrio starts with a simple menu:
-
 ```text
-Torrio 1.2
+Torrio 1.3
+Android torrent search & download for Termux
 
-1) Вставить magnet или ссылку
-2) Выбрать .torrent-файл
-3) Найти раздачу
-0) Выход
-
+ [1] Paste magnet link or .torrent URL
+ [2] Select a local .torrent file
+ [3] Search torrents
+ [0] Exit
 >
 ```
 
-The current terminal interface is in Russian.
-
 ### 1 — Paste a magnet link or torrent URL
 
-Choose:
-
-```text
-1
-```
-
-Paste either:
+Choose `1` and paste either a magnet link:
 
 ```text
 magnet:?xt=urn:btih:...
 ```
 
-or an HTTP/HTTPS URL pointing to a torrent resource.
+or an HTTP/HTTPS URL.
 
-Torrio passes the target directly to aria2.
+Torrio passes the target to aria2.
 
 ### 2 — Select a local `.torrent` file
 
-Choose:
+Choose `2`.
 
-```text
-2
-```
-
-Torrio searches for `.torrent` files in commonly used locations, including:
+Torrio searches for `.torrent` files in common locations, including:
 
 - Android `Download`
 - `Download/Torrio`
 - `~/Torrio`
 - the current working directory
 
-Files are shown with numbers. Enter a number to select a file.
-
-Example:
+Files are displayed with global numbers.
 
 ```text
   1) debian.iso.torrent
@@ -178,7 +167,7 @@ Example:
      /data/data/com.termux/files/home/storage/downloads/Torrio
 ```
 
-Available commands:
+Commands:
 
 ```text
 number = select
@@ -188,84 +177,30 @@ r      = enter a path manually
 q      = quit
 ```
 
-### 3 — Search for a torrent
+### 3 — Search torrents
 
-Choose:
+Choose `3`.
 
-```text
-3
-```
-
-Torrio asks four questions.
-
-#### Name
-
-Required.
-
-Example:
+Torrio asks four questions:
 
 ```text
-Debian
+What are you looking for?
+Format / type [Enter = any]:
+Version / year / date [Enter = any]:
+Exclude words or phrases [Enter = none]:
 ```
 
-#### Format or type
-
-Optional. Press Enter to skip.
-
-Examples:
-
-```text
-netinst amd64
-flac
-book
-linux x86_64
-```
-
-#### Version, year or date
-
-Optional. Press Enter to skip.
-
-Examples:
-
-```text
-13.5
-2025
-4.5
-```
-
-#### Excluded words
-
-Optional. Press Enter to skip.
-
-Examples:
-
-```text
-video course
-```
-
-or:
-
-```text
--video -course
-```
-
-Quoted phrases are also supported:
-
-```text
-"linux mint" tutorial
-```
-
-Torrio treats excluded words as whole terms. For example, excluding `book` does not exclude `Bookworm`.
+Only the first field is required.
 
 ## Search examples
 
 ### Debian netinst image
 
 ```text
-Что ищем: Debian
-Формат / тип [Enter — любой]: netinst amd64
-Версия / год / дата [Enter — любая]: 13.5
-Исключить слова [Enter — нет]:
+What are you looking for? Debian
+Format / type [Enter = any]: netinst amd64
+Version / year / date [Enter = any]: 13.5
+Exclude words or phrases [Enter = none]:
 ```
 
 Generated query:
@@ -277,10 +212,10 @@ Debian netinst amd64 13.5
 ### FLAC music search
 
 ```text
-Что ищем: Enigma
-Формат / тип [Enter — любой]: flac
-Версия / год / дата [Enter — любая]:
-Исключить слова [Enter — нет]:
+What are you looking for? Enigma
+Format / type [Enter = any]: flac
+Version / year / date [Enter = any]:
+Exclude words or phrases [Enter = none]:
 ```
 
 Generated query:
@@ -292,11 +227,25 @@ Enigma flac
 ### Software search with exclusions
 
 ```text
-Что ищем: Blender
-Формат / тип [Enter — любой]: linux x86_64
-Версия / год / дата [Enter — любая]: 4.5
-Исключить слова [Enter — нет]: tutorial course
+What are you looking for? Blender
+Format / type [Enter = any]: linux x86_64
+Version / year / date [Enter = any]: 4.5
+Exclude words or phrases [Enter = none]: tutorial course
 ```
+
+Excluded terms can also be written with a leading minus sign:
+
+```text
+-video -course
+```
+
+Quoted phrases are supported:
+
+```text
+"linux mint" tutorial
+```
+
+Torrio treats a single excluded word as a whole term. For example, excluding `book` does not exclude `Bookworm`.
 
 ## Search sources
 
@@ -312,43 +261,55 @@ Search availability and result quality depend on third-party sources and their c
 
 ## Search result navigation
 
-Search results are shown as numbered pages.
-
-Example:
+Results are displayed as numbered pages. Long titles wrap instead of being truncated.
 
 ```text
-Результаты 1–8 из 74 загруженных · страница 1/10
+Results 1–8 of 74 loaded · page 1/10
 
-   1) First torrent title
-      [KN · сиды 84 · 10.9GB]
+   1) A long torrent title that automatically wraps onto
+      another terminal line
+      [KN · seeders 84 · 10.9GB]
 
-   2) A longer torrent title that automatically wraps
-      onto another terminal line
-      [KN · сиды 40 · 724.8MB]
+   2) Another result
+      [IA · downloads 1200 · 762.9MB]
 ```
 
 Commands:
 
 ```text
-number = select a result
-n      = next page
-p      = previous page
-m      = load more remote results
+number = select
+n      = next
+p      = previous
+m      = load more
 q      = quit
 ```
 
-When more results are loaded, Torrio merges, deduplicates and re-sorts the complete result list.
+When additional results are loaded, Torrio merges, deduplicates and re-sorts the complete list.
 
 ## Selected result menu
 
-After selecting a result, Torrio displays its metadata and the following menu:
+After selecting a result, Torrio displays a result card:
 
 ```text
-[m] проверить метаданные
-[d] скачать через aria2c
-[c] скопировать magnet/.torrent URL
-[o] открыть страницу источника
-[q] выйти
+ SELECTED RESULT ───────────────────────────────────────────
+Source: KN
+Title: Example torrent title
+Size: 464.3MB
+Seeders: 13
+Downloads: ?
+Infohash: ...
+Type: magnet
+Page: ...
+```
+
+Available actions:
+
+```text
+ [m] Fetch BitTorrent metadata
+ [d] Download with aria2c
+ [c] Copy magnet/.torrent URL
+ [o] Open source page
+ [q] Quit
 ```
 
 ### `m` — Fetch BitTorrent metadata
@@ -359,7 +320,7 @@ For magnet links, aria2 is started in metadata-only mode.
 
 The selected magnet link, torrent URL or local torrent file is passed to aria2.
 
-The download directory is displayed before aria2 starts.
+Torrio displays the download directory and enables a wake lock before aria2 starts.
 
 ### `c` — Copy the target
 
@@ -367,7 +328,7 @@ Copies the magnet link or torrent URL when `termux-clipboard-set` is available.
 
 ### `o` — Open the source page
 
-Opens the result source page when `termux-open-url` is available.
+Opens the source page when `termux-open-url` is available.
 
 ## Wake lock and screen-off downloads
 
@@ -377,27 +338,44 @@ Before aria2 starts, Torrio calls:
 termux-wake-lock
 ```
 
-When the download process finishes or is interrupted, Torrio calls:
+When aria2 finishes or is interrupted, Torrio calls:
 
 ```bash
 termux-wake-unlock
 ```
 
-This prevents the CPU from going to sleep while aria2 is running and allows the screen to be turned off during a download.
+This prevents the CPU from going to sleep while aria2 is running and lets the screen be turned off during a download.
 
-Android vendors may still apply aggressive battery restrictions to background applications. If downloads are terminated after switching away from Termux, check the battery settings for Termux and allow unrestricted background activity where available.
+Android vendors may still apply aggressive battery restrictions to background applications. If downloads are terminated after switching away from Termux, check Android battery settings for Termux and allow unrestricted background activity where available.
+
+## Colors and `NO_COLOR`
+
+Torrio uses a small ANSI color palette for headings, menu keys and status labels such as:
+
+```text
+[OK]
+[INFO]
+[WARN]
+[ERROR]
+```
+
+Colors are automatically disabled when output is not connected to an interactive terminal or when `TERM=dumb`.
+
+Torrio also respects the `NO_COLOR` environment variable:
+
+```bash
+NO_COLOR=1 torrio
+```
 
 ## Direct command-line search
 
-The interactive interface is the default, but Torrio also keeps a direct command-line mode for advanced users.
-
-Example:
+Interactive mode is the default, but direct CLI search is also available.
 
 ```bash
 torrio Debian --format "netinst amd64" --fresh "13.5" --exclude "book mint"
 ```
 
-Select a specific source:
+Select a source:
 
 ```bash
 torrio Debian --source knaben
@@ -405,13 +383,13 @@ torrio Debian --source foss
 torrio Debian --source ia
 ```
 
-Change the remote fetch batch size:
+Change the remote batch size:
 
 ```bash
 torrio Debian --batch-size 100
 ```
 
-Change the number of displayed results per terminal page:
+Change the number of results displayed per terminal page:
 
 ```bash
 torrio Debian --page-size 5
@@ -419,14 +397,14 @@ torrio Debian --page-size 5
 
 ## Updating Torrio
 
-Download the current script again and reinstall it over the existing command:
+Download the current script and reinstall it over the existing command:
 
 ```bash
 curl -L https://raw.githubusercontent.com/Ayuemin/torrio/main/torrio.py -o ~/torrio.py
 install -m 755 ~/torrio.py $PREFIX/bin/torrio
 ```
 
-Start Torrio:
+Then run:
 
 ```bash
 torrio
@@ -440,7 +418,7 @@ Remove the installed command:
 rm $PREFIX/bin/torrio
 ```
 
-This does not remove downloaded files from `Download/Torrio`.
+This does not remove files from `Download/Torrio`.
 
 ## Notes
 
@@ -448,7 +426,7 @@ This does not remove downloaded files from `Download/Torrio`.
 - Torrio uses only the Python standard library.
 - aria2 handles BitTorrent and other supported download protocols.
 - Search sources are external services and may change or become temporarily unavailable.
-- The current interactive UI is in Russian.
+- Search matching keeps Unicode/Cyrillic support even though the interface is in English.
 
 ## Disclaimer
 
