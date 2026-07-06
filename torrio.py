@@ -4,10 +4,12 @@ from __future__ import annotations
 import argparse
 import html
 import json
+import os
 import re
 import shlex
 import shutil
 import subprocess
+import sys
 import textwrap
 import urllib.error
 import urllib.parse
@@ -25,6 +27,64 @@ TIMEOUT = 20
 KNABEN_URL = "https://api.knaben.org/v1"
 IA_URL = "https://archive.org/advancedsearch.php"
 FOSS_FEED_URL = "https://fosstorrents.com/feed/torrents.xml"
+
+
+class Style:
+    def __init__(self) -> None:
+        no_color = os.environ.get("NO_COLOR") is not None
+        dumb_term = os.environ.get("TERM", "").casefold() == "dumb"
+        self.enabled = sys.stdout.isatty() and not no_color and not dumb_term
+
+    def wrap(self, text: str, code: str) -> str:
+        if not self.enabled:
+            return text
+        return f"\033[{code}m{text}\033[0m"
+
+    def cyan(self, text: str) -> str:
+        return self.wrap(text, "36")
+
+    def green(self, text: str) -> str:
+        return self.wrap(text, "32")
+
+    def yellow(self, text: str) -> str:
+        return self.wrap(text, "33")
+
+    def red(self, text: str) -> str:
+        return self.wrap(text, "31")
+
+    def bold(self, text: str) -> str:
+        return self.wrap(text, "1")
+
+    def dim(self, text: str) -> str:
+        return self.wrap(text, "2")
+
+
+STYLE = Style()
+
+
+def status(kind: str, message: str) -> None:
+    labels = {
+        "ok": STYLE.green("[OK]"),
+        "info": STYLE.cyan("[INFO]"),
+        "warn": STYLE.yellow("[WARN]"),
+        "error": STYLE.red("[ERROR]"),
+    }
+    print(f"{labels.get(kind, '[INFO]')} {message}")
+
+
+def terminal_width() -> int:
+    return max(40, min(shutil.get_terminal_size((80, 24)).columns, 120))
+
+
+def section(title: str) -> None:
+    width = terminal_width()
+    label = f" {title} "
+    line = "─" * max(1, width - len(label))
+    print("\n" + STYLE.cyan(label + line))
+
+
+def prompt_value(label: str) -> str:
+    return input(STYLE.cyan(label)).strip()
 
 
 def get_download_dir() -> tuple[Path, bool]:
@@ -522,14 +582,14 @@ class SearchSession:
 
     def load_initial(self) -> None:
         if not self.foss_done:
-            print("Загрузка FOSS Torrents...", end=" ", flush=True)
+            print("Loading FOSS Torrents...", end=" ", flush=True)
 
             try:
                 found = search_foss_all(self.spec)
                 added = self._merge(found)
-                print(f"{added}")
+                print(STYLE.green(str(added)))
             except Exception as exc:
-                print(f"ошибка: {type(exc).__name__}: {exc}")
+                print(STYLE.red(f"error: {type(exc).__name__}: {exc}"))
 
             self.foss_done = True
 
@@ -537,7 +597,7 @@ class SearchSession:
 
     def load_more(self, *, show_header: bool = True) -> int:
         if show_header:
-            print("\nЗагружаю следующую порцию...")
+            print("\nLoading the next batch...")
 
         added_total = 0
 
@@ -555,29 +615,28 @@ class SearchSession:
                     self.knaben_offset,
                     self.batch_size,
                 )
-
-                self.knaben_offset += raw_count
                 added = self._merge(found)
                 added_total += added
+                self.knaben_offset += raw_count
 
                 if raw_count < self.batch_size:
                     self.knaben_done = True
-
-                suffix = " · конец" if self.knaben_done else ""
-                print(f"+{added}{suffix}")
+                    print(STYLE.green(f"+{added} · end"))
+                else:
+                    print(STYLE.green(f"+{added}"))
 
             except urllib.error.HTTPError as exc:
-                print(f"HTTP {exc.code}")
+                print(STYLE.red(f"HTTP {exc.code}"))
                 self.knaben_done = True
             except urllib.error.URLError as exc:
-                print(f"сеть: {exc.reason}")
+                print(STYLE.yellow(f"network error: {exc.reason}"))
             except Exception as exc:
-                print(f"{type(exc).__name__}: {exc}")
+                print(STYLE.red(f"error: {type(exc).__name__}: {exc}"))
                 self.knaben_done = True
 
         if not self.ia_done:
             print(
-                f"Internet Archive [страница {self.ia_page}]...",
+                f"Internet Archive [page {self.ia_page}]...",
                 end=" ",
                 flush=True,
             )
@@ -588,24 +647,23 @@ class SearchSession:
                     self.ia_page,
                     self.batch_size,
                 )
-
-                self.ia_page += 1
                 added = self._merge(found)
                 added_total += added
+                self.ia_page += 1
 
                 if raw_count < self.batch_size:
                     self.ia_done = True
-
-                suffix = " · конец" if self.ia_done else ""
-                print(f"+{added}{suffix}")
+                    print(STYLE.green(f"+{added} · end"))
+                else:
+                    print(STYLE.green(f"+{added}"))
 
             except urllib.error.HTTPError as exc:
-                print(f"HTTP {exc.code}")
+                print(STYLE.red(f"HTTP {exc.code}"))
                 self.ia_done = True
             except urllib.error.URLError as exc:
-                print(f"сеть: {exc.reason}")
+                print(STYLE.yellow(f"network error: {exc.reason}"))
             except Exception as exc:
-                print(f"{type(exc).__name__}: {exc}")
+                print(STYLE.red(f"error: {type(exc).__name__}: {exc}"))
                 self.ia_done = True
 
         return added_total
@@ -615,18 +673,13 @@ class SearchSession:
         return self.knaben_done and self.ia_done
 
 
-def terminal_width() -> int:
-    width = shutil.get_terminal_size((80, 24)).columns
-    return max(40, min(width, 120))
-
-
-def metadata_text(item: Result) -> str:
+def build_metric(item: Result) -> str:
     parts = [item.source]
 
     if item.seeders is not None:
-        parts.append(f"сиды {item.seeders}")
+        parts.append(f"seeders {item.seeders}")
     elif item.downloads is not None:
-        parts.append(f"загрузки {item.downloads}")
+        parts.append(f"downloads {item.downloads}")
 
     if item.size is not None:
         parts.append(human_size(item.size))
@@ -634,7 +687,7 @@ def metadata_text(item: Result) -> str:
     return " · ".join(parts)
 
 
-def print_wrapped_result(
+def print_result_item(
     number: int,
     item: Result,
     width: int,
@@ -643,28 +696,28 @@ def print_wrapped_result(
     indent = " " * len(prefix)
     title_width = max(20, width - len(prefix))
 
-    wrapped = textwrap.wrap(
+    wrapped_title = textwrap.wrap(
         item.title,
         width=title_width,
         break_long_words=True,
         break_on_hyphens=True,
     ) or [""]
 
-    print(prefix + wrapped[0])
+    print(STYLE.bold(prefix + wrapped_title[0]))
 
-    for line in wrapped[1:]:
+    for line in wrapped_title[1:]:
         print(indent + line)
 
-    meta = f"[{metadata_text(item)}]"
-    meta_lines = textwrap.wrap(
-        meta,
+    metadata = f"[{build_metric(item)}]"
+    wrapped_meta = textwrap.wrap(
+        metadata,
         width=max(20, width - len(indent)),
-        break_long_words=False,
-        break_on_hyphens=False,
-    ) or [meta]
+        break_long_words=True,
+        break_on_hyphens=True,
+    ) or [metadata]
 
-    for line in meta_lines:
-        print(indent + line)
+    for line in wrapped_meta:
+        print(indent + STYLE.dim(line))
 
 
 def show_result_page(
@@ -675,39 +728,29 @@ def show_result_page(
 ) -> None:
     width = terminal_width()
     total = len(results)
-
-    if total == 0:
-        print("\nНичего не найдено.")
-        return
-
     total_pages = max(1, (total + page_size - 1) // page_size)
-    page_index = min(page_index, total_pages - 1)
-
     start = page_index * page_size
     end = min(start + page_size, total)
 
-    print("\n" + "─" * width)
+    print("\n" + STYLE.cyan("─" * width))
     print(
-        f"Результаты {start + 1}–{end} из {total} загруженных "
-        f"· страница {page_index + 1}/{total_pages}"
+        STYLE.bold(
+            f"Results {start + 1}–{end} of {total} loaded "
+            f"· page {page_index + 1}/{total_pages}"
+        )
     )
-    print("─" * width)
+    print(STYLE.cyan("─" * width))
 
     for index in range(start, end):
-        print_wrapped_result(
-            index + 1,
-            results[index],
-            width,
-        )
+        print_result_item(index + 1, results[index], width)
         print()
 
-    commands = "номер = выбрать · n = дальше · p = назад"
+    print(STYLE.cyan("─" * width))
+    commands = "number = select · n = next · p = previous"
     if not remote_done:
-        commands += " · m = загрузить ещё"
-    commands += " · q = выход"
-
-    print("─" * width)
-    print(commands)
+        commands += " · m = load more"
+    commands += " · q = quit"
+    print(STYLE.dim(commands))
 
 
 def select_result(
@@ -720,7 +763,7 @@ def select_result(
         results = session.results
 
         if not results:
-            print("\nНичего не найдено.")
+            status("warn", "No results found.")
             return None
 
         total_pages = max(1, (len(results) + page_size - 1) // page_size)
@@ -734,7 +777,7 @@ def select_result(
         )
 
         try:
-            command = input("> ").strip().lower()
+            command = prompt_value("> ").lower()
         except (EOFError, KeyboardInterrupt):
             print()
             return None
@@ -746,7 +789,7 @@ def select_result(
             if page_index > 0:
                 page_index -= 1
             else:
-                print("Это первая страница.")
+                status("info", "This is the first page.")
             continue
 
         if command == "n":
@@ -755,7 +798,7 @@ def select_result(
                 continue
 
             if session.remote_done:
-                print("Это последняя загруженная страница.")
+                status("info", "This is the last loaded page.")
                 continue
 
             old_total = len(session.results)
@@ -763,40 +806,40 @@ def select_result(
             new_total = len(session.results)
 
             if new_total == old_total:
-                print("Новых уникальных результатов нет.")
+                status("info", "No new unique results were found.")
             else:
-                # После пересортировки остаёмся на текущей странице.
-                print(
-                    f"Теперь загружено результатов: {new_total}. "
-                    "Список пересортирован."
+                status(
+                    "ok",
+                    f"{new_total} results loaded. The list was re-sorted.",
                 )
             continue
 
         if command == "m":
             if session.remote_done:
-                print("Удалённые источники больше результатов не отдают.")
+                status("info", "Remote sources have no more results.")
                 continue
 
             old_total = len(session.results)
             session.load_more()
             new_total = len(session.results)
 
-            print(
-                f"Загружено: {new_total} "
-                f"(новых уникальных: {new_total - old_total})."
+            status(
+                "ok",
+                f"{new_total} results loaded "
+                f"({new_total - old_total} new unique).",
             )
             continue
 
         try:
             number = int(command)
         except ValueError:
-            print("Введите номер результата, n, p, m или q.")
+            status("warn", "Enter a result number, n, p, m or q.")
             continue
 
         if 1 <= number <= len(results):
             return results[number - 1]
 
-        print(f"Номер должен быть от 1 до {len(results)}.")
+        status("warn", f"The number must be between 1 and {len(results)}.")
 
 
 def copy_target(value: str) -> None:
@@ -809,9 +852,9 @@ def copy_target(value: str) -> None:
             text=True,
             check=False,
         )
-        print("Ссылка скопирована в буфер Android.")
+        status("ok", "Target copied to the Android clipboard.")
     else:
-        print("\ntermux-clipboard-set не найден. Ссылка:")
+        status("warn", "termux-clipboard-set was not found. Target:")
         print(value)
 
 
@@ -824,15 +867,40 @@ def open_page(url: str) -> None:
         print(url)
 
 
-def run_aria2(target: str, *, metadata_only: bool) -> None:
+def set_wake_lock(enabled: bool) -> bool:
+    command_name = "termux-wake-lock" if enabled else "termux-wake-unlock"
+    command = shutil.which(command_name)
+
+    if not command:
+        if enabled:
+            status(
+                "warn",
+                "termux-wake-lock was not found. Android may pause the "
+                "download when the screen is off.",
+            )
+        return False
+
+    try:
+        completed = subprocess.run(
+            [command],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            check=False,
+        )
+        return completed.returncode == 0
+    except OSError:
+        return False
+
+
+def run_aria2(target: str, *, metadata_only: bool) -> int:
     aria2c = shutil.which("aria2c")
 
     if not aria2c:
-        print("aria2c не найден. Установи: pkg install aria2")
-        return
+        status("error", "aria2c was not found. Install it with: pkg install aria2")
+        return 127
 
     destination, _ = get_download_dir()
-    print(f"Папка: {destination}")
+    status("info", f"Download directory: {destination}")
 
     command = [
         aria2c,
@@ -848,23 +916,35 @@ def run_aria2(target: str, *, metadata_only: bool) -> None:
         )
 
     command.append(target)
-    subprocess.run(command, check=False)
+
+    wake_lock_acquired = set_wake_lock(True)
+
+    if wake_lock_acquired:
+        status("ok", "Wake lock enabled — the screen can be turned off.")
+
+    try:
+        completed = subprocess.run(command, check=False)
+        return completed.returncode
+    except KeyboardInterrupt:
+        return 130
+    finally:
+        if wake_lock_acquired:
+            set_wake_lock(False)
 
 
 def show_result(item: Result) -> None:
+    section("SELECTED RESULT")
     width = terminal_width()
 
-    print("\n" + "=" * width)
-
     for label, value in (
-        ("Источник", item.source),
-        ("Название", item.title),
-        ("Размер", human_size(item.size)),
-        ("Сиды", item.seeders if item.seeders is not None else "?"),
-        ("Загрузки", item.downloads if item.downloads is not None else "?"),
+        ("Source", item.source),
+        ("Title", item.title),
+        ("Size", human_size(item.size)),
+        ("Seeders", item.seeders if item.seeders is not None else "?"),
+        ("Downloads", item.downloads if item.downloads is not None else "?"),
         ("Infohash", item.infohash or "?"),
-        ("Тип", "magnet" if item.magnet else ".torrent URL"),
-        ("Страница", item.page_url or "—"),
+        ("Type", "magnet" if item.magnet else ".torrent URL"),
+        ("Page", item.page_url or "—"),
     ):
         prefix = f"{label}: "
         wrapped = textwrap.wrap(
@@ -874,30 +954,29 @@ def show_result(item: Result) -> None:
             break_on_hyphens=True,
         ) or [""]
 
-        print(prefix + wrapped[0])
+        print(STYLE.bold(prefix) + wrapped[0])
 
         for line in wrapped[1:]:
             print(" " * len(prefix) + line)
-
-    print("=" * width)
 
 
 def action_menu(item: Result) -> None:
     target = item.target
 
     if not target:
-        print("У результата нет magnet или .torrent URL.")
+        status("error", "This result has no magnet link or .torrent URL.")
         return
 
     while True:
-        print("\n[m] проверить метаданные")
-        print("[d] скачать через aria2c")
-        print("[c] скопировать magnet/.torrent URL")
-        print("[o] открыть страницу источника")
-        print("[q] выйти")
+        print()
+        print(f" {STYLE.cyan('[m]')} Fetch BitTorrent metadata")
+        print(f" {STYLE.cyan('[d]')} Download with aria2c")
+        print(f" {STYLE.cyan('[c]')} Copy magnet/.torrent URL")
+        print(f" {STYLE.cyan('[o]')} Open source page")
+        print(f" {STYLE.cyan('[q]')} Quit")
 
         try:
-            action = input("> ").strip().lower()
+            action = prompt_value("> ").lower()
         except (EOFError, KeyboardInterrupt):
             print()
             return
@@ -906,13 +985,15 @@ def action_menu(item: Result) -> None:
             if item.magnet:
                 run_aria2(item.magnet, metadata_only=True)
             else:
-                print(
-                    "У результата уже есть .torrent URL; "
-                    "metadata-only для magnet здесь не нужен."
+                status(
+                    "info",
+                    "This result already has a .torrent URL; magnet metadata-only "
+                    "mode is not needed.",
                 )
 
         elif action == "d":
             run_aria2(target, metadata_only=False)
+            return
 
         elif action == "c":
             copy_target(target)
@@ -921,21 +1002,250 @@ def action_menu(item: Result) -> None:
             if item.page_url:
                 open_page(item.page_url)
             else:
-                print("Страница источника не указана.")
+                status("info", "No source page is available for this result.")
 
         elif action == "q":
             return
 
         else:
-            print("Неизвестное действие.")
+            status("warn", "Unknown action.")
 
 
-def prompt_spec() -> SearchSpec:
-    print(f"{APP_NAME} {APP_VERSION} — поиск торрент-раздач\n")
+def prompt_start_mode() -> str:
+    print()
+    print(STYLE.bold(STYLE.cyan(f"{APP_NAME} {APP_VERSION}")))
+    print(STYLE.dim("Android torrent search & download for Termux"))
+    print()
+    print(f" {STYLE.cyan('[1]')} Paste magnet link or .torrent URL")
+    print(f" {STYLE.cyan('[2]')} Select a local .torrent file")
+    print(f" {STYLE.cyan('[3]')} Search torrents")
+    print(f" {STYLE.cyan('[0]')} Exit")
 
     while True:
         try:
-            name = input("Что ищем: ").strip()
+            choice = prompt_value("> ")
+        except (EOFError, KeyboardInterrupt):
+            print()
+            return "exit"
+
+        modes = {
+            "0": "exit",
+            "1": "link",
+            "2": "file",
+            "3": "search",
+        }
+
+        if choice in modes:
+            return modes[choice]
+
+        status("warn", "Enter 0, 1, 2 or 3.")
+
+
+def prompt_link() -> str | None:
+    section("PASTE LINK")
+    print("Paste a magnet link or a .torrent URL:")
+
+    try:
+        value = prompt_value("> ")
+    except (EOFError, KeyboardInterrupt):
+        print()
+        return None
+
+    if not value:
+        return None
+
+    lower = value.casefold()
+    if lower.startswith("magnet:?"):
+        return value
+
+    if lower.startswith(("http://", "https://")):
+        return value
+
+    status("error", "The value does not look like a magnet or HTTP/HTTPS URL.")
+    return None
+
+
+def torrent_search_roots() -> list[Path]:
+    roots: list[Path] = []
+    home = Path.home()
+    shared_downloads = home / "storage" / "downloads"
+
+    for candidate in (
+        shared_downloads,
+        shared_downloads / APP_NAME,
+        home / APP_NAME,
+        Path.cwd(),
+    ):
+        try:
+            resolved = candidate.resolve()
+        except OSError:
+            resolved = candidate
+
+        if candidate.is_dir() and resolved not in roots:
+            roots.append(resolved)
+
+    return roots
+
+
+def find_torrent_files() -> list[Path]:
+    found: dict[str, Path] = {}
+
+    for root in torrent_search_roots():
+        try:
+            for path in root.rglob("*.torrent"):
+                if not path.is_file():
+                    continue
+
+                try:
+                    resolved = path.resolve()
+                except OSError:
+                    resolved = path
+
+                found[str(resolved)] = resolved
+        except (OSError, PermissionError):
+            continue
+
+    def sort_key(path: Path) -> tuple[float, str]:
+        try:
+            mtime = path.stat().st_mtime
+        except OSError:
+            mtime = 0.0
+        return (-mtime, path.name.casefold())
+
+    return sorted(found.values(), key=sort_key)
+
+
+def print_torrent_file(number: int, path: Path, width: int) -> None:
+    prefix = f"{number:>3}) "
+    indent = " " * len(prefix)
+    name_width = max(20, width - len(prefix))
+
+    wrapped_name = textwrap.wrap(
+        path.name,
+        width=name_width,
+        break_long_words=True,
+        break_on_hyphens=True,
+    ) or [""]
+
+    print(STYLE.bold(prefix + wrapped_name[0]))
+    for line in wrapped_name[1:]:
+        print(indent + line)
+
+    display_path = str(path.parent)
+    wrapped_path = textwrap.wrap(
+        display_path,
+        width=max(20, width - len(indent)),
+        break_long_words=True,
+        break_on_hyphens=True,
+    ) or [display_path]
+
+    for line in wrapped_path:
+        print(indent + STYLE.dim(line))
+
+
+def prompt_torrent_path() -> Path | None:
+    section("TORRENT PATH")
+    print("Enter the full path to a .torrent file:")
+
+    try:
+        value = prompt_value("> ")
+    except (EOFError, KeyboardInterrupt):
+        print()
+        return None
+
+    if not value:
+        return None
+
+    path = Path(value).expanduser()
+
+    if not path.is_file():
+        status("error", "File not found.")
+        return None
+
+    if path.suffix.casefold() != ".torrent":
+        status("error", "The selected file is not a .torrent file.")
+        return None
+
+    return path
+
+
+def choose_torrent_file(page_size: int = 8) -> Path | None:
+    files = find_torrent_files()
+    width = terminal_width()
+
+    if not files:
+        status("info", "No .torrent files were found in Download or Torrio folders.")
+        return prompt_torrent_path()
+
+    page = 0
+
+    while True:
+        total_pages = max(1, (len(files) + page_size - 1) // page_size)
+        page = min(page, total_pages - 1)
+        start = page * page_size
+        end = min(start + page_size, len(files))
+
+        print("\n" + STYLE.cyan("─" * width))
+        print(
+            STYLE.bold(
+                f".torrent files {start + 1}–{end} of {len(files)} "
+                f"· page {page + 1}/{total_pages}"
+            )
+        )
+        print(STYLE.cyan("─" * width))
+
+        for index in range(start, end):
+            print_torrent_file(index + 1, files[index], width)
+            print()
+
+        print(
+            STYLE.dim(
+                "number = select · n = next · p = previous · "
+                "r = manual path · q = quit"
+            )
+        )
+
+        try:
+            command = prompt_value("> ").lower()
+        except (EOFError, KeyboardInterrupt):
+            print()
+            return None
+
+        if command == "q":
+            return None
+        if command == "r":
+            return prompt_torrent_path()
+        if command == "n":
+            if page + 1 < total_pages:
+                page += 1
+            else:
+                status("info", "This is the last page.")
+            continue
+        if command == "p":
+            if page > 0:
+                page -= 1
+            else:
+                status("info", "This is the first page.")
+            continue
+
+        try:
+            number = int(command)
+        except ValueError:
+            status("warn", "Enter a number, n, p, r or q.")
+            continue
+
+        if 1 <= number <= len(files):
+            return files[number - 1]
+
+        status("warn", f"The number must be between 1 and {len(files)}.")
+
+
+def prompt_spec() -> SearchSpec:
+    section("SEARCH")
+
+    while True:
+        try:
+            name = prompt_value("What are you looking for? ")
         except (EOFError, KeyboardInterrupt):
             print()
             raise SystemExit(130)
@@ -943,18 +1253,12 @@ def prompt_spec() -> SearchSpec:
         if name:
             break
 
-        print("Название обязательно.\n")
+        status("warn", "A search name is required.")
 
     try:
-        format_hint = input(
-            "Формат / тип [Enter — любой]: "
-        ).strip()
-        freshness = input(
-            "Версия / год / дата [Enter — любая]: "
-        ).strip()
-        exclude_raw = input(
-            "Исключить слова [Enter — нет]: "
-        ).strip()
+        format_hint = prompt_value("Format / type [Enter = any]: ")
+        freshness = prompt_value("Version / year / date [Enter = any]: ")
+        exclude_raw = prompt_value("Exclude words or phrases [Enter = none]: ")
     except (EOFError, KeyboardInterrupt):
         print()
         raise SystemExit(130)
@@ -969,7 +1273,7 @@ def prompt_spec() -> SearchSpec:
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description=f"{APP_NAME} — интерактивный поиск торрент-раздач в Termux."
+        description=f"{APP_NAME} — interactive torrent search for Termux."
     )
 
     parser.add_argument(
@@ -1019,6 +1323,7 @@ def main() -> int:
     args = parse_args()
 
     if args.query:
+        mode = "search"
         spec = SearchSpec(
             name=" ".join(args.query),
             format_hint=args.format_hint,
@@ -1026,27 +1331,44 @@ def main() -> int:
             exclude=parse_exclusions(args.exclude),
         )
     else:
+        mode = prompt_start_mode()
+
+        if mode == "exit":
+            return 0
+
+        if mode == "link":
+            target = prompt_link()
+            if target:
+                run_aria2(target, metadata_only=False)
+            return 0
+
+        if mode == "file":
+            torrent_file = choose_torrent_file(
+                page_size=max(3, min(args.page_size, 20))
+            )
+            if torrent_file:
+                run_aria2(str(torrent_file), metadata_only=False)
+            return 0
+
         spec = prompt_spec()
 
-    width = terminal_width()
     destination, shared_storage = get_download_dir()
+    section("SEARCH QUERY")
+    print(STYLE.bold("Query:     ") + spec.query)
+    print(
+        STYLE.bold("Exclude:   ")
+        + (", ".join(spec.exclude) if spec.exclude else "—")
+    )
+    print(STYLE.dim(f"Downloads: {destination}"))
 
-    print(f"\nПапка загрузок: {destination}")
     if not shared_storage:
-        print(
-            "Внимание: общая память Android не подключена. "
-            "Выполни termux-setup-storage, чтобы сохранять в Download/Torrio."
+        status(
+            "warn",
+            "Android shared storage is not configured. Run termux-setup-storage "
+            "to save files in Download/Torrio.",
         )
 
-    print("\n" + "─" * width)
-    print(f"Запрос:     {spec.query}")
-
-    if spec.exclude:
-        print("Исключить:  " + ", ".join(spec.exclude))
-    else:
-        print("Исключить:  —")
-
-    print("─" * width + "\n")
+    print()
 
     batch_size = max(10, min(args.batch_size, 100))
     page_size = max(3, min(args.page_size, 20))
@@ -1060,10 +1382,10 @@ def main() -> int:
     session.load_initial()
 
     if not session.results:
-        print("\nНичего не найдено.")
+        status("warn", "No results found.")
         return 1
 
-    print(f"\nВсего загружено результатов: {len(session.results)}")
+    status("ok", f"{len(session.results)} results loaded.")
 
     item = select_result(session, page_size)
 
@@ -1077,4 +1399,7 @@ def main() -> int:
 
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    try:
+        raise SystemExit(main())
+    except KeyboardInterrupt:
+        raise SystemExit(0)
